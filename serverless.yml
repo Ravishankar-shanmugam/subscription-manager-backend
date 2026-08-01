@@ -45,7 +45,7 @@ provider:
     S3_BUCKET_NAME: ${self:custom.bucketName}
 
 custom:
-  bucketName: subscription-app-docs
+  bucketName: subscription-app-docs-${aws:accountId}-${sls:stage}
   tableName: subscription-manager-dev
   uploadPrefix: uploads/
 
@@ -69,7 +69,6 @@ functions:
           event: s3:ObjectCreated:*
           rules:
             - prefix: ${self:custom.uploadPrefix}
-          existing: true
 
 resources:
   Resources:
@@ -114,12 +113,3 @@ resources:
             Projection:
               ProjectionType: ALL
 
-    InvoiceBucket:
-      Type: AWS::S3::Bucket
-      Properties:
-        BucketName: ${self:custom.bucketName}
-        PublicAccessBlockConfiguration:
-          BlockPublicAcls: true
-          BlockPublicPolicy: true
-          IgnorePublicAcls: true
-          RestrictPublicBuckets: true
