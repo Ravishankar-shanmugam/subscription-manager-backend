@@ -12,9 +12,18 @@ function getContentType(event: APIGatewayProxyEvent): string {
   return event.headers?.['Content-Type'] || event.headers?.['content-type'] || '';
 }
 
-function decodeBody(event: APIGatewayProxyEvent): Buffer {
+function decodeBody(event: APIGatewayProxyEvent, contentType: string): Buffer {
   if (!event.body) return Buffer.alloc(0);
-  return event.isBase64Encoded ? Buffer.from(event.body, 'base64') : Buffer.from(event.body, 'utf8');
+  if (event.isBase64Encoded) {
+    return Buffer.from(event.body, 'base64');
+  }
+
+  if (contentType.includes('multipart/form-data')) {
+    // Fallback path when API Gateway did not flag the body as base64.
+    return Buffer.from(event.body, 'latin1');
+  }
+
+  return Buffer.from(event.body, 'utf8');
 }
 
 function parseMultipartPayload(
@@ -65,7 +74,7 @@ export function extractInvoicePayload(event: APIGatewayProxyEvent): InvoiceUploa
   if (!event.body) return null;
 
   const contentType = getContentType(event);
-  const bodyBuffer = decodeBody(event);
+  const bodyBuffer = decodeBody(event, contentType);
 
   if (contentType.includes('application/json') || contentType.includes('text/plain')) {
     try {
@@ -91,6 +100,11 @@ export function extractInvoicePayload(event: APIGatewayProxyEvent): InvoiceUploa
 
 export async function uploadInvoice(event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> {
   try {
+    const contentType = getContentType(event);
+    if (contentType.includes('multipart/form-data') && !event.isBase64Encoded) {
+      console.warn('[invoices] Multipart payload was not base64 encoded by API Gateway; using latin1 fallback decode');
+    }
+
     const payload = extractInvoicePayload(event);
     if (!payload) return badRequest('No file content provided');
 

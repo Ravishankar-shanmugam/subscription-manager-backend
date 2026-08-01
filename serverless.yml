@@ -14,6 +14,15 @@ provider:
   runtime: nodejs22.x
   region: us-east-1
   stage: dev
+  apiGateway:
+    binaryMediaTypes:
+      - multipart/form-data
+      - image/png
+      - image/jpeg
+      - image/jpg
+      - image/webp
+      - image/tiff
+      - application/pdf
   iam:
     role:
       statements:
