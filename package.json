@@ -1,0 +1,37 @@
+{
+  "name": "@subscription-manager/backend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/local-server.ts",
+    "build": "tsc",
+    "lint": "eslint . --ext ts --report-unused-disable-directives --max-warnings 0",
+    "test": "jest",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.600.0",
+    "@aws-sdk/client-s3": "^3.1101.0",
+    "@aws-sdk/client-textract": "^3.1101.0",
+    "@aws-sdk/lib-dynamodb": "^3.600.0",
+    "@subscription-manager/shared": "*",
+    "@types/multer": "^2.2.0",
+    "dotenv": "^17.4.2",
+    "multer": "^2.2.0",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.140",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.14.9",
+    "@types/uuid": "^10.0.0",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.5.3"
+  }
+}

@@ -1,0 +1,125 @@
+service: subscription-manager
+
+package:
+  patterns:
+    - dist/**
+    - package.json
+    - ../shared/dist/**
+    - ../shared/package.json
+    - '!frontend/**'
+    - '!**/frontend/**'
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  region: us-east-1
+  stage: dev
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - dynamodb:PutItem
+            - dynamodb:GetItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+            - dynamodb:Scan
+            - dynamodb:Query
+          Resource: '*'
+        - Effect: Allow
+          Action:
+            - s3:GetObject
+            - s3:PutObject
+            - s3:ListBucket
+          Resource:
+            - arn:aws:s3:::${self:custom.bucketName}
+            - arn:aws:s3:::${self:custom.bucketName}/*
+        - Effect: Allow
+          Action:
+            - textract:StartDocumentTextDetection
+            - textract:GetDocumentTextDetection
+          Resource: '*'
+  environment:
+    AWS_REGION: ${self:provider.region}
+    DYNAMODB_TABLE_NAME: ${self:custom.tableName}
+    S3_BUCKET_NAME: ${self:custom.bucketName}
+
+custom:
+  bucketName: subscription-app-docs
+  tableName: subscription-manager-dev
+  uploadPrefix: uploads/
+
+functions:
+  api:
+    handler: dist/index.handler
+    events:
+      - http:
+          path: /{proxy+}
+          method: any
+          cors: true
+    environment:
+      S3_BUCKET_NAME: ${self:custom.bucketName}
+      DYNAMODB_TABLE_NAME: ${self:custom.tableName}
+
+  processInvoice:
+    handler: dist/handlers/textractProcessor.processInvoiceFromS3
+    events:
+      - s3:
+          bucket: ${self:custom.bucketName}
+          event: s3:ObjectCreated:*
+          rules:
+            - prefix: ${self:custom.uploadPrefix}
+          existing: true
+
+resources:
+  Resources:
+    SubscriptionTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:custom.tableName}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: PK
+            AttributeType: S
+          - AttributeName: SK
+            AttributeType: S
+          - AttributeName: GSI1PK
+            AttributeType: S
+          - AttributeName: GSI1SK
+            AttributeType: S
+          - AttributeName: GSI2PK
+            AttributeType: S
+          - AttributeName: GSI2SK
+            AttributeType: S
+        KeySchema:
+          - AttributeName: PK
+            KeyType: HASH
+          - AttributeName: SK
+            KeyType: RANGE
+        GlobalSecondaryIndexes:
+          - IndexName: GSI1
+            KeySchema:
+              - AttributeName: GSI1PK
+                KeyType: HASH
+              - AttributeName: GSI1SK
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+          - IndexName: GSI2
+            KeySchema:
+              - AttributeName: GSI2PK
+                KeyType: HASH
+              - AttributeName: GSI2SK
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+
+    InvoiceBucket:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:custom.bucketName}
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: true
+          BlockPublicPolicy: true
+          IgnorePublicAcls: true
+          RestrictPublicBuckets: true
