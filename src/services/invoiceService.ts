@@ -1,6 +1,11 @@
 import { execFile } from 'node:child_process';
 import { TextractClient, DetectDocumentTextCommand, type Block } from '@aws-sdk/client-textract';
-import type { CreateSubscriptionInput, SubscriptionCategory, SubscriptionStatus, BillingFrequency } from '@subscription-manager/shared';
+import type {
+  CreateSubscriptionInput,
+  SubscriptionCategory,
+  SubscriptionStatus,
+  BillingFrequency,
+} from '../types/subscription';
 import { loadBackendEnv } from '../utils/env';
 import { subscriptionService } from './subscriptionService';
 

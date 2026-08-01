@@ -1,7 +1,7 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { subscriptionService } from '../services/subscriptionService';
 import { ok, created, noContent, badRequest, handleError } from '../utils/response';
-import type { CreateSubscriptionInput, SubscriptionListParams } from '@subscription-manager/shared';
+import type { CreateSubscriptionInput, SubscriptionListParams } from '../types/subscription';
 
 export async function listSubscriptions(
   event: APIGatewayProxyEvent,

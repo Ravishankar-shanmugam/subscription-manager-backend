@@ -14,7 +14,7 @@ import type {
   PaginatedResponse,
   SubscriptionStatus,
   SubscriptionCategory,
-} from '@subscription-manager/shared';
+} from '../types/subscription';
 
 const DATA_FILE = path.resolve(__dirname, '../../data/subscriptions.json');
 

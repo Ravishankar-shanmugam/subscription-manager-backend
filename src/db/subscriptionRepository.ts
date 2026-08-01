@@ -16,7 +16,7 @@ import type {
   PaginatedResponse,
   SubscriptionStatus,
   SubscriptionCategory,
-} from '@subscription-manager/shared';
+} from '../types/subscription';
 
 // ─── DynamoDB Schema ──────────────────────────────────────────────────────────
 // PK: SUBSCRIPTION#{id}

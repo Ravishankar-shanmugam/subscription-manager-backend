@@ -24,6 +24,5 @@ if ! command -v serverless >/dev/null 2>&1; then
 fi
 
 npm install
-npm run build --workspace=shared
-npm run build --workspace=backend
+npm run build
 npx serverless deploy --stage dev

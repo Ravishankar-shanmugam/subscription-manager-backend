@@ -10,7 +10,7 @@ import type {
   UpcomingRenewal,
   SpendingByCategory,
   SubscriptionCategory,
-} from '@subscription-manager/shared';
+} from '../types/subscription';
 
 const repo = process.env.USE_LOCAL_JSON === 'true' ? jsonRepository : subscriptionRepository;
 
