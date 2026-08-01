@@ -11,9 +11,22 @@ export type SubscriptionCategory =
 
 export type BillingFrequency = 'MONTHLY' | 'YEARLY';
 
+export interface InvoiceAudit {
+  title: string;
+  price: number;
+  currency: string;
+  cardUsed: string | null;
+  taxes: number | null;
+  invoiceDate: string | null;
+  vendor: string | null;
+  forms: Record<string, string>;
+  extractedText: string;
+}
+
 export interface Subscription {
   id: string;
   serviceName: string;
+  invoiceTitle?: string;
   category: SubscriptionCategory;
   billingFrequency: BillingFrequency;
   amount: number;
@@ -23,6 +36,7 @@ export interface Subscription {
   reminderDaysBefore: number[];
   notes?: string;
   websiteUrl?: string;
+  invoiceAudit?: InvoiceAudit;
   status: SubscriptionStatus;
   createdAt: string;
   updatedAt: string;
@@ -30,6 +44,7 @@ export interface Subscription {
 
 export interface CreateSubscriptionInput {
   serviceName: string;
+  invoiceTitle?: string;
   category: SubscriptionCategory;
   billingFrequency: BillingFrequency;
   amount: number;
@@ -39,11 +54,13 @@ export interface CreateSubscriptionInput {
   reminderDaysBefore: number[];
   notes?: string;
   websiteUrl?: string;
+  invoiceAudit?: InvoiceAudit;
   status?: SubscriptionStatus;
 }
 
 export interface UpdateSubscriptionInput {
   serviceName?: string;
+  invoiceTitle?: string;
   category?: SubscriptionCategory;
   billingFrequency?: BillingFrequency;
   amount?: number;
@@ -53,6 +70,7 @@ export interface UpdateSubscriptionInput {
   reminderDaysBefore?: number[];
   notes?: string;
   websiteUrl?: string;
+  invoiceAudit?: InvoiceAudit;
   status?: SubscriptionStatus;
 }
 

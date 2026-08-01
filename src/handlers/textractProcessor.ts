@@ -1,11 +1,19 @@
 import type { S3Event, S3EventRecord } from 'aws-lambda';
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { buildSubscriptionInputFromText, extractTextFromImage } from '../services/invoiceService';
+import {
+  AnalyzeDocumentCommand,
+  DetectDocumentTextCommand,
+  TextractClient,
+  type Block,
+} from '@aws-sdk/client-textract';
+import { auditInvoiceWithBedrock } from '../services/bedrockAuditor';
+import { buildSubscriptionInputFromText, inferBillingFrequency, inferCategory } from '../services/invoiceService';
 import { subscriptionService } from '../services/subscriptionService';
 import type { CreateSubscriptionInput } from '../types/subscription';
 import { loadBackendEnv } from '../utils/env';
 
 const s3Client = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' });
+const textractClient = new TextractClient({ region: process.env.AWS_REGION || 'us-east-1' });
 
 loadBackendEnv(__dirname);
 
@@ -28,37 +36,134 @@ async function getDocumentBody(bucket: string, key: string): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
+function extractLines(blocks: Block[]): string {
+  return blocks
+    .filter((block) => block.BlockType === 'LINE' && block.Text)
+    .map((block) => block.Text || '')
+    .join('\n');
+}
+
+function extractFormFields(blocks: Block[]): Record<string, string> {
+  const blockMap = new Map<string, Block>();
+  const keyBlocks: Block[] = [];
+
+  for (const block of blocks) {
+    if (block.Id) blockMap.set(block.Id, block);
+    if (block.BlockType === 'KEY_VALUE_SET' && block.EntityTypes?.includes('KEY')) {
+      keyBlocks.push(block);
+    }
+  }
+
+  const getTextFromRelationships = (relationships?: Block['Relationships']) => {
+    if (!relationships) return '';
+    const childIds = relationships
+      .filter((rel) => rel.Type === 'CHILD')
+      .flatMap((rel) => rel.Ids || []);
+    return childIds
+      .map((id) => blockMap.get(id))
+      .filter((b) => b && (b.BlockType === 'WORD' || b.BlockType === 'SELECTION_ELEMENT'))
+      .map((b) => {
+        if (!b) return '';
+        if (b.BlockType === 'SELECTION_ELEMENT') return b.SelectionStatus === 'SELECTED' ? 'X' : '';
+        return b.Text || '';
+      })
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+  };
+
+  const formFields: Record<string, string> = {};
+
+  for (const keyBlock of keyBlocks) {
+    const keyText = getTextFromRelationships(keyBlock.Relationships);
+    if (!keyText) continue;
+
+    const valueRelationship = keyBlock.Relationships?.find((rel) => rel.Type === 'VALUE');
+    const valueId = valueRelationship?.Ids?.[0];
+    if (!valueId) continue;
+    const valueBlock = blockMap.get(valueId);
+    if (!valueBlock) continue;
+
+    const valueText = getTextFromRelationships(valueBlock.Relationships);
+    if (valueText) {
+      formFields[keyText] = valueText;
+    }
+  }
+
+  return formFields;
+}
+
+async function extractTextractData(bucket: string, key: string): Promise<{ forms: Record<string, string>; text: string }> {
+  const formsResponse = await textractClient.send(
+    new AnalyzeDocumentCommand({
+      Document: {
+        S3Object: {
+          Bucket: bucket,
+          Name: key,
+        },
+      },
+      FeatureTypes: ['FORMS'],
+    }),
+  );
+
+  const formBlocks = (formsResponse.Blocks || []) as Block[];
+  const forms = extractFormFields(formBlocks);
+  let text = extractLines(formBlocks);
+
+  if (!text) {
+    const textResponse = await textractClient.send(
+      new DetectDocumentTextCommand({
+        Document: {
+          S3Object: {
+            Bucket: bucket,
+            Name: key,
+          },
+        },
+      }),
+    );
+    text = extractLines((textResponse.Blocks || []) as Block[]);
+  }
+
+  return { forms, text };
+}
+
 export async function processInvoiceFromS3(event: S3Event) {
-  const processed: Array<{ bucket: string; key: string; created: boolean; serviceName: string }> = [];
+  const processed: Array<{ bucket: string; key: string; created: boolean; invoiceTitle: string }> = [];
 
   for (const record of event.Records || []) {
     const { bucket, key } = getBucketAndKey(record);
     if (!key.startsWith('uploads/')) continue;
 
-    const body = await getDocumentBody(bucket, key);
-    const extractedText = await extractTextFromImage(body);
+    await getDocumentBody(bucket, key);
+    const textractData = await extractTextractData(bucket, key);
+    const bedrockAudit = await auditInvoiceWithBedrock({
+      extractedText: textractData.text,
+      forms: textractData.forms,
+    });
 
-    const inferred = buildSubscriptionInputFromText(extractedText);
-    const serviceName = inferred.serviceName || 'Unknown Service';
+    const inferred = buildSubscriptionInputFromText(textractData.text);
+    const invoiceTitle = bedrockAudit.title || inferred.serviceName || 'Unknown Invoice';
     const upsertInput: CreateSubscriptionInput = {
-      serviceName,
-      category: inferred.category || 'OTHER',
-      billingFrequency: inferred.billingFrequency || 'MONTHLY',
-      amount: inferred.amount && inferred.amount > 0 ? inferred.amount : 0,
-      currency: inferred.currency || 'USD',
+      serviceName: invoiceTitle,
+      invoiceTitle,
+      category: inferred.category || inferCategory(`${invoiceTitle} ${textractData.text}`) || 'OTHER',
+      billingFrequency: inferred.billingFrequency || inferBillingFrequency(textractData.text) || 'MONTHLY',
+      amount: bedrockAudit.price > 0 ? bedrockAudit.price : inferred.amount && inferred.amount > 0 ? inferred.amount : 0,
+      currency: bedrockAudit.currency || inferred.currency || 'USD',
       renewalDate: inferred.renewalDate || new Date().toISOString().slice(0, 10),
       autoRenew: inferred.autoRenew ?? true,
       reminderDaysBefore: inferred.reminderDaysBefore ?? [7],
       status: inferred.status || 'ACTIVE',
       notes: key,
+      invoiceAudit: bedrockAudit,
     };
 
-    const upsertResult = await subscriptionService.upsertByServiceName(upsertInput);
+    const upsertResult = await subscriptionService.upsertByInvoiceTitle(upsertInput);
     processed.push({
       bucket,
       key,
       created: upsertResult.created,
-      serviceName: upsertResult.subscription.serviceName,
+      invoiceTitle: upsertResult.subscription.invoiceTitle || upsertResult.subscription.serviceName,
     });
   }
 

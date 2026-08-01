@@ -18,6 +18,10 @@ function normalizeServiceName(serviceName: string): string {
   return serviceName.replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
+function resolveUniqueTitle(input: { invoiceTitle?: string; serviceName: string }): string {
+  return (input.invoiceTitle || input.serviceName || 'Unknown Invoice').trim();
+}
+
 export const subscriptionService = {
   list: (params: SubscriptionListParams) => repo.list(params),
 
@@ -28,11 +32,12 @@ export const subscriptionService = {
   },
 
   create: async (input: CreateSubscriptionInput) => {
-    const existing = await subscriptionService.findByServiceName(input.serviceName);
+    const existing = await subscriptionService.findByInvoiceTitle(resolveUniqueTitle(input));
     if (existing) {
       const updated = await subscriptionService.update(existing.id, {
         ...input,
         serviceName: existing.serviceName,
+        invoiceTitle: existing.invoiceTitle || existing.serviceName,
       });
       return updated;
     }
@@ -40,24 +45,44 @@ export const subscriptionService = {
     return repo.create(input);
   },
 
-  upsertByServiceName: async (input: CreateSubscriptionInput) => {
-    const existing = await subscriptionService.findByServiceName(input.serviceName);
+  upsertByInvoiceTitle: async (input: CreateSubscriptionInput) => {
+    const uniqueTitle = resolveUniqueTitle(input);
+    const existing = await subscriptionService.findByInvoiceTitle(uniqueTitle);
+
     if (existing) {
       const updated = await subscriptionService.update(existing.id, {
         ...input,
         serviceName: existing.serviceName,
+        invoiceTitle: existing.invoiceTitle || existing.serviceName,
       });
       return { created: false, subscription: updated };
     }
 
-    const created = await repo.create(input);
+    const created = await repo.create({
+      ...input,
+      serviceName: uniqueTitle,
+      invoiceTitle: uniqueTitle,
+    });
     return { created: true, subscription: created };
   },
 
-  findByServiceName: async (serviceName: string) => {
-    const normalized = normalizeServiceName(serviceName);
+  upsertByServiceName: async (input: CreateSubscriptionInput) => {
+    return subscriptionService.upsertByInvoiceTitle(input);
+  },
+
+  findByInvoiceTitle: async (invoiceTitle: string) => {
+    const normalized = normalizeServiceName(invoiceTitle);
     const all = await repo.list({ pageSize: 1000 });
-    return all.items.find((sub) => normalizeServiceName(sub.serviceName) === normalized) ?? null;
+    return (
+      all.items.find((sub) => {
+        const uniqueTitle = sub.invoiceTitle || sub.serviceName;
+        return normalizeServiceName(uniqueTitle) === normalized;
+      }) ?? null
+    );
+  },
+
+  findByServiceName: async (serviceName: string) => {
+    return subscriptionService.findByInvoiceTitle(serviceName);
   },
 
   findMatching: async (serviceName: string) => {
