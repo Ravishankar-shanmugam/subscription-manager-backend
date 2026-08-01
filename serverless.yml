@@ -40,7 +40,6 @@ provider:
             - textract:GetDocumentTextDetection
           Resource: '*'
   environment:
-    AWS_REGION: ${self:provider.region}
     DYNAMODB_TABLE_NAME: ${self:custom.tableName}
     S3_BUCKET_NAME: ${self:custom.bucketName}
 
