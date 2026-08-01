@@ -37,4 +37,6 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Deploy serverless stack
-        run: npx serverless@4 deploy --stage dev
+        env:
+          SLS_INTERACTIVE_SETUP_ENABLE: "0"
+        run: npx serverless@3 deploy --stage dev
