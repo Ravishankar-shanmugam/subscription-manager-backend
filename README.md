@@ -3,7 +3,7 @@
 Node.js + TypeScript backend for the subscription manager application.
 
 ## Prerequisites
-- Node.js 20+
+- Node.js 22+
 - npm 10+
 - AWS credentials configured locally for S3/Textract/DynamoDB access
 
