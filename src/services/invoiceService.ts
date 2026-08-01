@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { TextractClient, DetectDocumentTextCommand, type Block } from '@aws-sdk/client-textract';
 import type {
   CreateSubscriptionInput,
@@ -7,12 +7,12 @@ import type {
   BillingFrequency,
 } from '../types/subscription';
 import { loadBackendEnv } from '../utils/env';
-import { subscriptionService } from './subscriptionService';
 
 loadBackendEnv(__dirname);
 
 const region = process.env.AWS_REGION || 'us-east-1';
 const textractClient = new TextractClient({ region });
+const s3Client = new S3Client({ region });
 
 export function normalizeText(value: string) {
   return value.replace(/\s+/g, ' ').trim();
@@ -81,11 +81,6 @@ export async function extractTextFromImage(buffer: Buffer): Promise<string> {
     return extractTextFromInvoiceBuffer(buffer);
   }
 
-  const utf8Text = buffer.toString('utf8').trim();
-  if (utf8Text) {
-    return utf8Text;
-  }
-
   try {
     const command = new DetectDocumentTextCommand({
       Document: {
@@ -116,61 +111,13 @@ export async function uploadDocumentToS3(
 ) {
   const contentType = metadata.contentType || 'application/octet-stream';
 
-  if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
-    return {
-      bucket: metadata.bucketName,
-      key: metadata.objectKey,
-      fileName: metadata.fileName || metadata.objectKey,
-      contentType,
-      uploadedToS3: false,
-    };
-  }
-
   try {
-    const fs = await import('node:fs');
-    const os = await import('node:os');
-    const path = await import('node:path');
-
-    const tempFilePath = path.join(os.tmpdir(), `${Date.now()}-${metadata.fileName || 'invoice'}`);
-    fs.writeFileSync(tempFilePath, buffer);
-
-    await new Promise<void>((resolve, reject) => {
-      execFile(
-        'aws',
-        [
-          's3',
-          'cp',
-          tempFilePath,
-          `s3://${metadata.bucketName}/${metadata.objectKey}`,
-          '--content-type',
-          contentType,
-          '--region',
-          region,
-        ],
-        {
-          env: {
-            ...process.env,
-            AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID || '',
-            AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY || '',
-            AWS_SESSION_TOKEN: process.env.AWS_SESSION_TOKEN || '',
-            AWS_REGION: region,
-            AWS_DEFAULT_REGION: region,
-            HTTPS_PROXY: '',
-            HTTP_PROXY: '',
-            ALL_PROXY: '',
-            https_proxy: '',
-            http_proxy: '',
-            all_proxy: '',
-          },
-        },
-        (error) => {
-          if (error) reject(error);
-          else resolve();
-        },
-      );
-    });
-
-    fs.unlinkSync(tempFilePath);
+    await s3Client.send(new PutObjectCommand({
+      Bucket: metadata.bucketName,
+      Key: metadata.objectKey,
+      Body: buffer,
+      ContentType: contentType,
+    }));
 
     return {
       bucket: metadata.bucketName,
@@ -215,13 +162,6 @@ export async function ingestInvoice(
   const bucketName = process.env.S3_BUCKET_NAME || 'subscription-app-docs';
   const objectKey = `uploads/${Date.now()}-${fileName.replace(/\s+/g, '-')}`;
 
-  const uploadMetadata = {
-    bucket: bucketName,
-    key: objectKey,
-    fileName,
-    contentType,
-  };
-
   const documentUpload = await uploadDocumentToS3(buffer, {
     bucketName,
     objectKey,
@@ -229,35 +169,8 @@ export async function ingestInvoice(
     fileName,
   });
 
-  const text = await extractTextFromImage(buffer);
-  const inferred = buildSubscriptionInputFromText(text);
-
-  const existing = await subscriptionService.findMatching(inferred.serviceName || '');
-
-  if (existing) {
-    const updated = await subscriptionService.update(existing.id, {
-      ...inferred,
-      serviceName: existing.serviceName,
-      category: inferred.category ?? existing.category,
-      amount: inferred.amount && inferred.amount > 0 ? inferred.amount : existing.amount,
-      renewalDate: inferred.renewalDate ?? existing.renewalDate,
-      billingFrequency: inferred.billingFrequency ?? existing.billingFrequency,
-      currency: inferred.currency ?? existing.currency,
-      autoRenew: inferred.autoRenew ?? existing.autoRenew,
-      reminderDaysBefore: inferred.reminderDaysBefore ?? existing.reminderDaysBefore,
-      status: inferred.status ?? existing.status,
-    });
-    return {
-      created: false,
-      subscription: updated,
-      document: documentUpload,
-    };
-  }
-
-  const created = await subscriptionService.create(inferred as CreateSubscriptionInput);
   return {
-    created: true,
-    subscription: created,
+    queued: true,
     document: documentUpload,
   };
 }

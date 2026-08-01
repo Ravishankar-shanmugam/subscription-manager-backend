@@ -46,8 +46,8 @@ export async function createSubscription(
     const input = JSON.parse(event.body) as CreateSubscriptionInput;
     if (!input.serviceName) return badRequest('serviceName is required');
     if (!input.amount || input.amount <= 0) return badRequest('amount must be positive');
-    const sub = await subscriptionService.create(input);
-    return created(sub);
+    const result = await subscriptionService.upsertByServiceName(input);
+    return result.created ? created(result.subscription) : ok(result.subscription, 'Updated existing subscription by serviceName');
   } catch (err) {
     return handleError(err);
   }

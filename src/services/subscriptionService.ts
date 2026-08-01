@@ -14,6 +14,10 @@ import type {
 
 const repo = process.env.USE_LOCAL_JSON === 'true' ? jsonRepository : subscriptionRepository;
 
+function normalizeServiceName(serviceName: string): string {
+  return serviceName.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
 export const subscriptionService = {
   list: (params: SubscriptionListParams) => repo.list(params),
 
@@ -23,12 +27,41 @@ export const subscriptionService = {
     return sub;
   },
 
-  create: (input: CreateSubscriptionInput) => repo.create(input),
+  create: async (input: CreateSubscriptionInput) => {
+    const existing = await subscriptionService.findByServiceName(input.serviceName);
+    if (existing) {
+      const updated = await subscriptionService.update(existing.id, {
+        ...input,
+        serviceName: existing.serviceName,
+      });
+      return updated;
+    }
+
+    return repo.create(input);
+  },
+
+  upsertByServiceName: async (input: CreateSubscriptionInput) => {
+    const existing = await subscriptionService.findByServiceName(input.serviceName);
+    if (existing) {
+      const updated = await subscriptionService.update(existing.id, {
+        ...input,
+        serviceName: existing.serviceName,
+      });
+      return { created: false, subscription: updated };
+    }
+
+    const created = await repo.create(input);
+    return { created: true, subscription: created };
+  },
+
+  findByServiceName: async (serviceName: string) => {
+    const normalized = normalizeServiceName(serviceName);
+    const all = await repo.list({ pageSize: 1000 });
+    return all.items.find((sub) => normalizeServiceName(sub.serviceName) === normalized) ?? null;
+  },
 
   findMatching: async (serviceName: string) => {
-    const all = await repo.list({ pageSize: 1000 });
-    const normalized = serviceName.toLowerCase();
-    return all.items.find((sub) => sub.serviceName.toLowerCase().includes(normalized) || normalized.includes(sub.serviceName.toLowerCase())) ?? null;
+    return subscriptionService.findByServiceName(serviceName);
   },
 
   update: async (id: string, input: UpdateSubscriptionInput) => {

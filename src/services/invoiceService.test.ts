@@ -1,7 +1,8 @@
 import { buildSubscriptionInputFromText, extractTextFromInvoiceBuffer, inferAmount, inferBillingFrequency, inferCategory, inferRenewalDate, inferServiceName, normalizeText, uploadDocumentToS3 } from './invoiceService';
 
-jest.mock('node:child_process', () => ({
-  execFile: jest.fn((_, __, ___, callback) => callback?.(null)),
+jest.mock('@aws-sdk/client-s3', () => ({
+  S3Client: jest.fn(() => ({ send: jest.fn(async () => ({})) })),
+  PutObjectCommand: jest.fn((input) => input),
 }));
 
 describe('invoice inference', () => {
@@ -27,11 +28,6 @@ Renewal Date: 2026-08-01`;
   });
 
   it('uploads document bytes to S3 with the expected metadata', async () => {
-    const originalAccessKeyId = process.env.AWS_ACCESS_KEY_ID;
-    const originalSecretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
-    process.env.AWS_ACCESS_KEY_ID = 'test-key';
-    process.env.AWS_SECRET_ACCESS_KEY = 'test-secret';
-
     const result = await uploadDocumentToS3(Buffer.from('invoice-bytes'), {
       bucketName: 'subscription-app-docs',
       objectKey: 'uploads/test-invoice.txt',
@@ -46,9 +42,6 @@ Renewal Date: 2026-08-01`;
       contentType: 'text/plain',
       uploadedToS3: true,
     });
-
-    process.env.AWS_ACCESS_KEY_ID = originalAccessKeyId;
-    process.env.AWS_SECRET_ACCESS_KEY = originalSecretAccessKey;
   });
 
   it('builds a subscription payload from extracted invoice text', () => {

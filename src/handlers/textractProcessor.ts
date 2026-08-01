@@ -1,28 +1,11 @@
 import type { S3Event, S3EventRecord } from 'aws-lambda';
-import { subscriptionRepository } from '../db/subscriptionRepository';
+import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { buildSubscriptionInputFromText, extractTextFromImage } from '../services/invoiceService';
+import { subscriptionService } from '../services/subscriptionService';
+import type { CreateSubscriptionInput } from '../types/subscription';
 import { loadBackendEnv } from '../utils/env';
 
-let s3Client: { send: (command: unknown) => Promise<any> } | null = null;
-let textractClient: { send: (command: unknown) => Promise<any> } | null = null;
-
-function getClients() {
-  if (!s3Client) {
-    const { S3Client } = require('@aws-sdk/client-s3') as {
-      S3Client: new (options: { region: string }) => { send: (command: unknown) => Promise<any> };
-    };
-    s3Client = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' });
-  }
-
-  if (!textractClient) {
-    const { TextractClient } = require('@aws-sdk/client-textract') as {
-      TextractClient: new (options: { region: string }) => { send: (command: unknown) => Promise<any> };
-    };
-    textractClient = new TextractClient({ region: process.env.AWS_REGION || 'us-east-1' });
-  }
-
-  return { s3Client, textractClient };
-}
+const s3Client = new S3Client({ region: process.env.AWS_REGION || 'us-east-1' });
 
 loadBackendEnv(__dirname);
 
@@ -34,11 +17,7 @@ function getBucketAndKey(record: S3EventRecord) {
 }
 
 async function getDocumentBody(bucket: string, key: string): Promise<Buffer> {
-  const { s3Client: client } = getClients();
-  const { GetObjectCommand } = require('@aws-sdk/client-s3') as {
-    GetObjectCommand: new (input: { Bucket: string; Key: string }) => unknown;
-  };
-  const response = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+  const response = await s3Client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
   const chunks: Buffer[] = [];
   const stream = response.Body as NodeJS.ReadableStream;
 
@@ -49,62 +28,46 @@ async function getDocumentBody(bucket: string, key: string): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
-async function runTextract(bucket: string, key: string): Promise<string> {
-  const { textractClient: client } = getClients();
-  const { StartDocumentTextDetectionCommand, GetDocumentTextDetectionCommand } = require('@aws-sdk/client-textract') as {
-    StartDocumentTextDetectionCommand: new (input: { DocumentLocation: { S3Object: { Bucket: string; Name: string } } }) => unknown;
-    GetDocumentTextDetectionCommand: new (input: { JobId: string }) => unknown;
-  };
-  const response = await client.send(new StartDocumentTextDetectionCommand({
-    DocumentLocation: {
-      S3Object: { Bucket: bucket, Name: key },
-    },
-  }));
-
-  const jobId = response.JobId;
-  if (!jobId) throw new Error('Textract job did not start');
-
-  let status = 'IN_PROGRESS';
-  let result;
-  while (status === 'IN_PROGRESS') {
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    result = await client.send(new GetDocumentTextDetectionCommand({ JobId: jobId }));
-    status = result.JobStatus || 'IN_PROGRESS';
-  }
-
-  if (result?.Blocks) {
-    return result.Blocks.filter((block: { BlockType?: string }) => block.BlockType === 'LINE')
-      .map((block: { Text?: string }) => block.Text || '')
-      .join('\n');
-  }
-
-  return '';
-}
-
 export async function processInvoiceFromS3(event: S3Event) {
+  const processed: Array<{ bucket: string; key: string; created: boolean; serviceName: string }> = [];
+
   for (const record of event.Records || []) {
     const { bucket, key } = getBucketAndKey(record);
     if (!key.startsWith('uploads/')) continue;
 
     const body = await getDocumentBody(bucket, key);
-    let extractedText = '';
-
-    try {
-      extractedText = await runTextract(bucket, key);
-    } catch {
-      extractedText = await extractTextFromImage(body);
-    }
+    const extractedText = await extractTextFromImage(body);
 
     const inferred = buildSubscriptionInputFromText(extractedText);
-    const created = await subscriptionRepository.create(inferred as never);
+    const serviceName = inferred.serviceName || 'Unknown Service';
+    const upsertInput: CreateSubscriptionInput = {
+      serviceName,
+      category: inferred.category || 'OTHER',
+      billingFrequency: inferred.billingFrequency || 'MONTHLY',
+      amount: inferred.amount && inferred.amount > 0 ? inferred.amount : 0,
+      currency: inferred.currency || 'USD',
+      renewalDate: inferred.renewalDate || new Date().toISOString().slice(0, 10),
+      autoRenew: inferred.autoRenew ?? true,
+      reminderDaysBefore: inferred.reminderDaysBefore ?? [7],
+      status: inferred.status || 'ACTIVE',
+      notes: key,
+    };
 
-    return {
-      created,
+    const upsertResult = await subscriptionService.upsertByServiceName(upsertInput);
+    processed.push({
       bucket,
       key,
-      extractedText,
-    };
+      created: upsertResult.created,
+      serviceName: upsertResult.subscription.serviceName,
+    });
   }
 
-  return { created: false, message: 'No upload records processed' };
+  if (processed.length === 0) {
+    return { created: false, message: 'No upload records processed' };
+  }
+
+  return {
+    processedCount: processed.length,
+    processed,
+  };
 }

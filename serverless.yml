@@ -36,6 +36,7 @@ provider:
             - arn:aws:s3:::${self:custom.bucketName}/*
         - Effect: Allow
           Action:
+            - textract:DetectDocumentText
             - textract:StartDocumentTextDetection
             - textract:GetDocumentTextDetection
           Resource: '*'
