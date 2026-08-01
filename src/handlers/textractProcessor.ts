@@ -94,37 +94,64 @@ function extractFormFields(blocks: Block[]): Record<string, string> {
 }
 
 async function extractTextractData(bucket: string, key: string): Promise<{ forms: Record<string, string>; text: string }> {
-  const formsResponse = await textractClient.send(
-    new AnalyzeDocumentCommand({
-      Document: {
-        S3Object: {
-          Bucket: bucket,
-          Name: key,
-        },
-      },
-      FeatureTypes: ['FORMS'],
-    }),
-  );
-
-  const formBlocks = (formsResponse.Blocks || []) as Block[];
-  const forms = extractFormFields(formBlocks);
-  let text = extractLines(formBlocks);
-
-  if (!text) {
-    const textResponse = await textractClient.send(
-      new DetectDocumentTextCommand({
+  try {
+    const formsResponse = await textractClient.send(
+      new AnalyzeDocumentCommand({
         Document: {
           S3Object: {
             Bucket: bucket,
             Name: key,
           },
         },
+        FeatureTypes: ['FORMS'],
       }),
     );
-    text = extractLines((textResponse.Blocks || []) as Block[]);
-  }
 
-  return { forms, text };
+    const formBlocks = (formsResponse.Blocks || []) as Block[];
+    const forms = extractFormFields(formBlocks);
+    let text = extractLines(formBlocks);
+
+    if (!text) {
+      const textResponse = await textractClient.send(
+        new DetectDocumentTextCommand({
+          Document: {
+            S3Object: {
+              Bucket: bucket,
+              Name: key,
+            },
+          },
+        }),
+      );
+      text = extractLines((textResponse.Blocks || []) as Block[]);
+    }
+
+    return { forms, text };
+  } catch (error) {
+    if (error instanceof Error && /UnsupportedDocumentException|unsupported document format/i.test(error.message)) {
+      console.warn('[textractProcessor] AnalyzeDocument FORMS unsupported, falling back to DetectDocumentText', {
+        bucket,
+        key,
+      });
+
+      const textResponse = await textractClient.send(
+        new DetectDocumentTextCommand({
+          Document: {
+            S3Object: {
+              Bucket: bucket,
+              Name: key,
+            },
+          },
+        }),
+      );
+
+      return {
+        forms: {},
+        text: extractLines((textResponse.Blocks || []) as Block[]),
+      };
+    }
+
+    throw error;
+  }
 }
 
 export async function processInvoiceFromS3(event: S3Event) {
@@ -136,9 +163,21 @@ export async function processInvoiceFromS3(event: S3Event) {
 
     await getDocumentBody(bucket, key);
     const textractData = await extractTextractData(bucket, key);
+    console.info('[textractProcessor] Invoking Bedrock auditor', {
+      bucket,
+      key,
+      extractedTextLength: textractData.text.length,
+      formsFieldCount: Object.keys(textractData.forms).length,
+    });
+
     const bedrockAudit = await auditInvoiceWithBedrock({
       extractedText: textractData.text,
       forms: textractData.forms,
+    });
+    console.info('[textractProcessor] Bedrock auditor completed', {
+      bucket,
+      key,
+      invoiceTitle: bedrockAudit.title,
     });
 
     const inferred = buildSubscriptionInputFromText(textractData.text);

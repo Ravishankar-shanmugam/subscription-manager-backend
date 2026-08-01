@@ -24,29 +24,38 @@ function parseMultipartPayload(
   const boundaryMatch = contentType.match(/boundary=([^;]+)/i);
   if (!boundaryMatch) return null;
 
-  const boundary = `--${boundaryMatch[1].trim()}`;
-  const body = bodyBuffer.toString('latin1');
-  const parts = body.split(boundary);
+  const boundary = Buffer.from(`--${boundaryMatch[1].trim()}`, 'utf8');
+  const headerSeparator = Buffer.from('\r\n\r\n', 'utf8');
+  const lineBreak = Buffer.from('\r\n', 'utf8');
+  let cursor = 0;
 
-  for (const part of parts) {
-    if (!part || part === '--\r\n' || part === '--') continue;
+  while (cursor < bodyBuffer.length) {
+    const boundaryStart = bodyBuffer.indexOf(boundary, cursor);
+    if (boundaryStart === -1) break;
 
-    const headerEnd = part.indexOf('\r\n\r\n');
-    if (headerEnd === -1) continue;
+    const partStart = boundaryStart + boundary.length + lineBreak.length;
+    const headerEnd = bodyBuffer.indexOf(headerSeparator, partStart);
+    if (headerEnd === -1) break;
 
-    const headersRaw = part.slice(0, headerEnd);
-    if (!/name="file"/i.test(headersRaw)) continue;
-
+    const headersRaw = bodyBuffer.subarray(partStart, headerEnd).toString('utf8');
+    const hasFileField = /name="file"/i.test(headersRaw);
     const fileNameMatch = headersRaw.match(/filename="([^"]+)"/i);
     const partContentTypeMatch = headersRaw.match(/content-type:\s*([^\r\n]+)/i);
-    const dataSection = part.slice(headerEnd + 4);
-    const trimmedData = dataSection.replace(/\r\n--$/, '').replace(/\r\n$/, '');
 
-    return {
-      buffer: Buffer.from(trimmedData, 'latin1'),
-      fileName: fileNameMatch?.[1],
-      contentType: partContentTypeMatch?.[1]?.trim(),
-    };
+    const dataStart = headerEnd + headerSeparator.length;
+    const nextBoundaryPrefix = Buffer.from(`\r\n--${boundaryMatch[1].trim()}`, 'utf8');
+    const dataEnd = bodyBuffer.indexOf(nextBoundaryPrefix, dataStart);
+    if (dataEnd === -1) break;
+
+    if (hasFileField) {
+      return {
+        buffer: bodyBuffer.subarray(dataStart, dataEnd),
+        fileName: fileNameMatch?.[1],
+        contentType: partContentTypeMatch?.[1]?.trim(),
+      };
+    }
+
+    cursor = dataEnd + 2;
   }
 
   return null;

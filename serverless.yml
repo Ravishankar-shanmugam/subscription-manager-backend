@@ -48,7 +48,7 @@ provider:
   environment:
     DYNAMODB_TABLE_NAME: ${self:custom.tableName}
     S3_BUCKET_NAME: ${self:custom.bucketName}
-    BEDROCK_MODEL_ID: ${env:BEDROCK_MODEL_ID, 'amazon.nova-lite-v1:0'}
+    BEDROCK_MODEL_ID: ${env:BEDROCK_MODEL_ID, 'amazon.nova-micro-v1:0'}
 
 custom:
   bucketName: subscription-app-docs-${aws:accountId}-${sls:stage}

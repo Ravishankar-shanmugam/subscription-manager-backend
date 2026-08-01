@@ -3,7 +3,7 @@ import type { InvoiceAudit } from '../types/subscription';
 
 const region = process.env.AWS_REGION || 'us-east-1';
 const bedrockClient = new BedrockRuntimeClient({ region });
-const modelId = process.env.BEDROCK_MODEL_ID || 'amazon.nova-lite-v1:0';
+const modelId = process.env.BEDROCK_MODEL_ID || 'amazon.nova-micro-v1:0';
 
 interface BedrockAuditInput {
   extractedText: string;
