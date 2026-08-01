@@ -23,7 +23,7 @@ jobs:
         run: npm ci
 
       - name: Run backend tests
-        run: npm run test --workspace=backend
+        run: npm test
 
       - name: Build backend artifacts
-        run: npm run build --workspace=shared && npm run build --workspace=backend
+        run: npm run build
