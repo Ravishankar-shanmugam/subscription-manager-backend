@@ -10,6 +10,7 @@ import type {
   UpcomingRenewal,
   SpendingByCategory,
   SubscriptionCategory,
+  ReportBucket,
 } from '../types/subscription';
 
 const repo = process.env.USE_LOCAL_JSON === 'true' ? jsonRepository : subscriptionRepository;
@@ -20,6 +21,26 @@ function normalizeServiceName(serviceName: string): string {
 
 function resolveUniqueTitle(input: { invoiceTitle?: string; serviceName: string }): string {
   return (input.invoiceTitle || input.serviceName || 'Unknown Invoice').trim();
+}
+
+function getPurchaseDate(sub: { purchaseDate?: string; invoiceAudit?: { invoiceDate: string | null }; createdAt: string }) {
+  const raw = sub.purchaseDate || sub.invoiceAudit?.invoiceDate || sub.createdAt;
+  const parsed = parseISO(raw);
+  return Number.isNaN(parsed.getTime()) ? parseISO(sub.createdAt) : parsed;
+}
+
+function getPurchaseChannel(sub: { purchaseChannel?: string; invoiceAudit?: { purchaseChannel: string | null } }) {
+  return sub.purchaseChannel || sub.invoiceAudit?.purchaseChannel || 'UNKNOWN';
+}
+
+function getPaymentCard(sub: { paymentCard?: string; invoiceAudit?: { cardUsed: string | null } }) {
+  return sub.paymentCard || sub.invoiceAudit?.cardUsed || 'Unknown';
+}
+
+function toBucketArray(map: Map<string, { monthly: number; count: number }>): ReportBucket[] {
+  return [...map.entries()]
+    .map(([label, value]) => ({ label, monthly: Math.round(value.monthly * 100) / 100, count: value.count }))
+    .sort((a, b) => b.monthly - a.monthly || a.label.localeCompare(b.label));
 }
 
 export const subscriptionService = {
@@ -127,6 +148,7 @@ export const dashboardService = {
     return {
       totalSubscriptions: all.total,
       activeSubscriptions: active.length,
+      monthlyIncomeTarget: 0,
       monthlySpending: Math.round(monthlySpending * 100) / 100,
       yearlySpending: Math.round(monthlySpending * 12 * 100) / 100,
       upcomingRenewals,
@@ -138,10 +160,13 @@ export const dashboardService = {
 
 export const reportService = {
   async getReports(): Promise<ReportData> {
-    const all = await repo.list({ pageSize: 1000, status: 'ACTIVE' as never });
+    const all = await repo.list({ pageSize: 1000 });
     const active = all.items;
 
     const categoryMap = new Map<SubscriptionCategory, SpendingByCategory>();
+    const monthMap = new Map<string, { monthly: number; count: number }>();
+    const channelMap = new Map<string, { monthly: number; count: number }>();
+    const cardMap = new Map<string, { monthly: number; count: number }>();
 
     for (const sub of active) {
       const monthly = sub.billingFrequency === 'MONTHLY' ? sub.amount : sub.amount / 12;
@@ -155,6 +180,24 @@ export const reportService = {
       } else {
         categoryMap.set(sub.category, { category: sub.category, monthly, yearly, count: 1 });
       }
+
+      const monthLabel = getPurchaseDate(sub).toLocaleDateString('en', { month: 'short', year: 'numeric' });
+      const monthCurrent = monthMap.get(monthLabel) || { monthly: 0, count: 0 };
+      monthCurrent.monthly += monthly;
+      monthCurrent.count += 1;
+      monthMap.set(monthLabel, monthCurrent);
+
+      const channelLabel = getPurchaseChannel(sub);
+      const channelCurrent = channelMap.get(channelLabel) || { monthly: 0, count: 0 };
+      channelCurrent.monthly += monthly;
+      channelCurrent.count += 1;
+      channelMap.set(channelLabel, channelCurrent);
+
+      const cardLabel = getPaymentCard(sub);
+      const cardCurrent = cardMap.get(cardLabel) || { monthly: 0, count: 0 };
+      cardCurrent.monthly += monthly;
+      cardCurrent.count += 1;
+      cardMap.set(cardLabel, cardCurrent);
     }
 
     const byCategory = Array.from(categoryMap.values()).map((c) => ({
@@ -182,6 +225,9 @@ export const reportService = {
       monthlySpending: Math.round(monthlySpending * 100) / 100,
       yearlySpending: Math.round(yearlySpending * 100) / 100,
       byCategory,
+      byMonth: toBucketArray(monthMap),
+      byPurchaseChannel: toBucketArray(channelMap),
+      byCard: toBucketArray(cardMap),
       upcomingRenewals,
     };
   },

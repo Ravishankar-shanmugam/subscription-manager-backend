@@ -1,13 +1,22 @@
 export type SubscriptionStatus = 'ACTIVE' | 'PAUSED' | 'CANCELLED';
 
 export type SubscriptionCategory =
+  | 'ENTERTAINMENT'
+  | 'GROCERY'
+  | 'FINANCE'
+  | 'HEALTH'
+  | 'PRODUCTIVITY'
+  | 'EDUCATION'
+  | 'TRAVEL'
+  | 'UTILITIES'
   | 'STREAMING'
   | 'MUSIC'
   | 'AI'
   | 'CLOUD'
-  | 'UTILITIES'
   | 'GAMING'
   | 'OTHER';
+
+export type PurchaseChannel = 'ONLINE' | 'PHYSICAL_STORE' | 'UNKNOWN';
 
 export type BillingFrequency = 'MONTHLY' | 'YEARLY';
 
@@ -19,6 +28,7 @@ export interface InvoiceAudit {
   taxes: number | null;
   invoiceDate: string | null;
   vendor: string | null;
+  purchaseChannel: PurchaseChannel | null;
   forms: Record<string, string>;
   extractedText: string;
 }
@@ -32,6 +42,9 @@ export interface Subscription {
   amount: number;
   currency: string;
   renewalDate: string;
+  purchaseDate?: string;
+  purchaseChannel?: PurchaseChannel;
+  paymentCard?: string;
   autoRenew: boolean;
   reminderDaysBefore: number[];
   notes?: string;
@@ -50,6 +63,9 @@ export interface CreateSubscriptionInput {
   amount: number;
   currency: string;
   renewalDate: string;
+  purchaseDate?: string;
+  purchaseChannel?: PurchaseChannel;
+  paymentCard?: string;
   autoRenew: boolean;
   reminderDaysBefore: number[];
   notes?: string;
@@ -66,6 +82,9 @@ export interface UpdateSubscriptionInput {
   amount?: number;
   currency?: string;
   renewalDate?: string;
+  purchaseDate?: string;
+  purchaseChannel?: PurchaseChannel;
+  paymentCard?: string;
   autoRenew?: boolean;
   reminderDaysBefore?: number[];
   notes?: string;
@@ -78,11 +97,19 @@ export interface SubscriptionListParams {
   search?: string;
   category?: SubscriptionCategory;
   status?: SubscriptionStatus;
+  purchaseChannel?: PurchaseChannel;
+  paymentCard?: string;
   renewalMonth?: number;
-  sortBy?: 'renewalDate' | 'amount' | 'serviceName' | 'createdAt';
+  sortBy?: 'renewalDate' | 'purchaseDate' | 'amount' | 'serviceName' | 'createdAt';
   sortOrder?: 'asc' | 'desc';
   page?: number;
   pageSize?: number;
+}
+
+export interface ReportBucket {
+  label: string;
+  monthly: number;
+  count: number;
 }
 
 export interface PaginatedResponse<T> {
@@ -101,6 +128,7 @@ export interface UpcomingRenewal {
 export interface DashboardStats {
   totalSubscriptions: number;
   activeSubscriptions: number;
+  monthlyIncomeTarget: number;
   monthlySpending: number;
   yearlySpending: number;
   upcomingRenewals: UpcomingRenewal[];
@@ -119,5 +147,8 @@ export interface ReportData {
   monthlySpending: number;
   yearlySpending: number;
   byCategory: SpendingByCategory[];
+  byMonth: ReportBucket[];
+  byPurchaseChannel: ReportBucket[];
+  byCard: ReportBucket[];
   upcomingRenewals: UpcomingRenewal[];
 }

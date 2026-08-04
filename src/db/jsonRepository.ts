@@ -16,6 +16,10 @@ import type {
   SubscriptionCategory,
 } from '../types/subscription';
 
+function resolvePurchaseDate(sub: Subscription): string {
+  return sub.purchaseDate || sub.invoiceAudit?.invoiceDate || sub.createdAt.slice(0, 10);
+}
+
 const DATA_FILE = path.resolve(__dirname, '../../data/subscriptions.json');
 
 let store: Subscription[] = [];
@@ -76,6 +80,8 @@ export const jsonRepository = {
       search,
       category,
       status,
+      purchaseChannel,
+      paymentCard,
       renewalMonth,
       sortBy = 'renewalDate',
       sortOrder = 'asc',
@@ -87,7 +93,21 @@ export const jsonRepository = {
     if (category) items = items.filter((s) => s.category === (category as SubscriptionCategory));
     if (search) {
       const q = search.toLowerCase();
-      items = items.filter((s) => s.serviceName.toLowerCase().includes(q));
+      items = items.filter((s) => {
+        const card = (s.paymentCard || s.invoiceAudit?.cardUsed || '').toLowerCase();
+        return (
+          s.serviceName.toLowerCase().includes(q) ||
+          (s.notes || '').toLowerCase().includes(q) ||
+          card.includes(q)
+        );
+      });
+    }
+    if (purchaseChannel) {
+      items = items.filter((s) => (s.purchaseChannel || s.invoiceAudit?.purchaseChannel) === purchaseChannel);
+    }
+    if (paymentCard) {
+      const q = paymentCard.toLowerCase();
+      items = items.filter((s) => (s.paymentCard || s.invoiceAudit?.cardUsed || '').toLowerCase().includes(q));
     }
     if (renewalMonth) {
       items = items.filter((s) => new Date(s.renewalDate).getMonth() + 1 === renewalMonth);
@@ -96,6 +116,7 @@ export const jsonRepository = {
     items.sort((a, b) => {
       let cmp = 0;
       if (sortBy === 'renewalDate') cmp = a.renewalDate.localeCompare(b.renewalDate);
+      else if (sortBy === 'purchaseDate') cmp = resolvePurchaseDate(a).localeCompare(resolvePurchaseDate(b));
       else if (sortBy === 'amount') cmp = a.amount - b.amount;
       else if (sortBy === 'serviceName') cmp = a.serviceName.localeCompare(b.serviceName);
       else if (sortBy === 'createdAt') cmp = a.createdAt.localeCompare(b.createdAt);

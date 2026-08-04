@@ -18,6 +18,10 @@ import type {
   SubscriptionCategory,
 } from '../types/subscription';
 
+function resolvePurchaseDate(sub: Subscription): string {
+  return sub.purchaseDate || sub.invoiceAudit?.invoiceDate || sub.createdAt.slice(0, 10);
+}
+
 // ─── DynamoDB Schema ──────────────────────────────────────────────────────────
 // PK: SUBSCRIPTION#{id}
 // SK: METADATA
@@ -111,7 +115,18 @@ export const subscriptionRepository = {
   },
 
   async list(params: SubscriptionListParams = {}): Promise<PaginatedResponse<Subscription>> {
-    const { page = 1, pageSize = 20, search, category, status, renewalMonth, sortBy = 'renewalDate', sortOrder = 'asc' } = params;
+    const {
+      page = 1,
+      pageSize = 20,
+      search,
+      category,
+      status,
+      purchaseChannel,
+      paymentCard,
+      renewalMonth,
+      sortBy = 'renewalDate',
+      sortOrder = 'asc',
+    } = params;
 
     // For MVP we use Scan with client-side filtering.
     // In production, use GSI queries for status/category filters.
@@ -136,7 +151,21 @@ export const subscriptionRepository = {
     }
     if (search) {
       const q = search.toLowerCase();
-      items = items.filter((s) => s.serviceName.toLowerCase().includes(q));
+      items = items.filter((s) => {
+        const card = (s.paymentCard || s.invoiceAudit?.cardUsed || '').toLowerCase();
+        return (
+          s.serviceName.toLowerCase().includes(q) ||
+          (s.notes || '').toLowerCase().includes(q) ||
+          card.includes(q)
+        );
+      });
+    }
+    if (purchaseChannel) {
+      items = items.filter((s) => (s.purchaseChannel || s.invoiceAudit?.purchaseChannel) === purchaseChannel);
+    }
+    if (paymentCard) {
+      const q = paymentCard.toLowerCase();
+      items = items.filter((s) => (s.paymentCard || s.invoiceAudit?.cardUsed || '').toLowerCase().includes(q));
     }
     if (renewalMonth) {
       items = items.filter((s) => {
@@ -149,6 +178,7 @@ export const subscriptionRepository = {
     items.sort((a, b) => {
       let cmp = 0;
       if (sortBy === 'renewalDate') cmp = a.renewalDate.localeCompare(b.renewalDate);
+      else if (sortBy === 'purchaseDate') cmp = resolvePurchaseDate(a).localeCompare(resolvePurchaseDate(b));
       else if (sortBy === 'amount') cmp = a.amount - b.amount;
       else if (sortBy === 'serviceName') cmp = a.serviceName.localeCompare(b.serviceName);
       else if (sortBy === 'createdAt') cmp = a.createdAt.localeCompare(b.createdAt);

@@ -10,6 +10,17 @@ interface BedrockAuditInput {
   forms: Record<string, string>;
 }
 
+function inferPurchaseChannel(text: string): InvoiceAudit['purchaseChannel'] {
+  const normalized = text.toLowerCase();
+  if (normalized.includes('physical store') || normalized.includes('in store') || normalized.includes('retail')) {
+    return 'PHYSICAL_STORE';
+  }
+  if (normalized.includes('online') || normalized.includes('website') || normalized.includes('web order') || normalized.includes('app')) {
+    return 'ONLINE';
+  }
+  return null;
+}
+
 function extractJsonObject(text: string): string | null {
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
@@ -50,6 +61,7 @@ function fallbackAudit(input: BedrockAuditInput): InvoiceAudit {
     taxes: taxMatch ? Number(taxMatch[1]) : null,
     invoiceDate: null,
     vendor: title,
+    purchaseChannel: inferPurchaseChannel(input.extractedText),
     forms: input.forms,
     extractedText: input.extractedText,
   };
@@ -70,6 +82,7 @@ export async function auditInvoiceWithBedrock(input: BedrockAuditInput): Promise
         taxes: 'number|null',
         invoiceDate: 'string|null (YYYY-MM-DD if available)',
         vendor: 'string|null',
+        purchaseChannel: 'ONLINE|PHYSICAL_STORE|null',
       },
       rules: [
         'title must identify the subscription/service invoice title',
@@ -124,6 +137,10 @@ export async function auditInvoiceWithBedrock(input: BedrockAuditInput): Promise
       invoiceDate:
         typeof parsed.invoiceDate === 'string' && parsed.invoiceDate.trim() ? parsed.invoiceDate.trim() : null,
       vendor: typeof parsed.vendor === 'string' && parsed.vendor.trim() ? parsed.vendor.trim() : null,
+      purchaseChannel:
+        parsed.purchaseChannel === 'ONLINE' || parsed.purchaseChannel === 'PHYSICAL_STORE'
+          ? parsed.purchaseChannel
+          : inferPurchaseChannel(input.extractedText),
       forms: input.forms,
       extractedText: input.extractedText,
     };
